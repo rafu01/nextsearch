@@ -1,0 +1,1 @@
+"""Embedding generation via OpenAI."""

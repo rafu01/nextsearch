@@ -1,4 +1,36 @@
-.idea
-node_modules
-pnpm-lock.yaml
+# IDE
+.idea/
+.vscode/
+
+# Secrets
 .env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Type checking
+.mypy_cache/
+
+# Data & vector store (don't commit your personal notes or DB)
+data/raw/
+data/chroma_db/
+data/processed/
+
+# OS
+.DS_Store

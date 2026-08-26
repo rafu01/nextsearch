@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nextsearch"
+version = "0.1.0"
+description = "RAG system for Obsidian notes and PDF textbooks"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    # --- Parsing ---
+    "pymupdf>=1.24",
+    "python-frontmatter>=1.0.1,<1.1",
+
+    # --- Embeddings ---
+    "openai>=1.30",
+
+    # --- Generation ---
+    "google-generativeai>=0.7",
+
+    # --- Vector Store ---
+    "chromadb>=0.5",
+
+    # --- Utilities ---
+    "python-dotenv>=1.0",
+    "rich>=13",
+    "typer>=0.12",
+    "tqdm>=4.66",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "tiktoken>=0.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-cov",
+    "ruff",
+    "mypy",
+]
+
+[project.scripts]
+nextsearch = "nextsearch.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.mypy]
+python_version = "3.9"
+ignore_missing_imports = true
