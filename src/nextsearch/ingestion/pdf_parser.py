@@ -6,11 +6,14 @@ Strategy:
 - Basic heuristics to skip header/footer noise.
 """
 
+import logging
 from pathlib import Path
 
 import fitz  # PyMuPDF
 
 from nextsearch.ingestion.models import Document
+
+_logger = logging.getLogger(__name__)
 
 
 def _extract_text_from_pdf(pdf_path: Path) -> tuple[str, dict]:
@@ -55,5 +58,5 @@ def parse_pdf_dir(directory: Path) -> list[Document]:
         try:
             docs.append(parse_pdf_file(pdf_path))
         except Exception as exc:  # noqa: BLE001
-            print(f"[WARN] Skipping {pdf_path}: {exc}")
+            _logger.warning("Skipping %s: %s", pdf_path, exc)
     return docs

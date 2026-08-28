@@ -6,13 +6,13 @@ from pathlib import Path
 
 from rich.console import Console
 from rich.panel import Panel
-from rich.markdown import Markdown
 
 from nextsearch.config import settings
 from nextsearch.embedding.openai_embedder import OpenAIEmbedder
 from nextsearch.generation.gemini_generator import GeminiGenerator
-from nextsearch.ingestion.chunker import TextChunker
+from nextsearch.ingestion.chunker import MarkdownChunker, TextChunker
 from nextsearch.ingestion.markdown_parser import parse_markdown_dir
+from nextsearch.ingestion.models import Chunk
 from nextsearch.ingestion.pdf_parser import parse_pdf_dir
 from nextsearch.retrieval.retriever import Retriever
 from nextsearch.vector_store.chroma_store import ChromaVectorStore
@@ -50,7 +50,11 @@ class RAGPipeline:
             api_key=settings.google_api_key,
             model=settings.gemini_model,
         )
-        self._chunker = TextChunker(
+        self._markdown_chunker = MarkdownChunker(
+            chunk_size=settings.chunk_size,
+            chunk_overlap=settings.chunk_overlap,
+        )
+        self._text_chunker = TextChunker(
             chunk_size=settings.chunk_size,
             chunk_overlap=settings.chunk_overlap,
         )
@@ -95,7 +99,14 @@ class RAGPipeline:
             return
 
         console.print(f"[green]Loaded {len(docs)} document(s). Chunking…[/green]")
-        chunks = self._chunker.chunk_documents(docs)
+        markdown_docs = [d for d in docs if d.doc_type == "markdown"]
+        pdf_docs = [d for d in docs if d.doc_type != "markdown"]
+
+        chunks: list[Chunk] = []
+        if markdown_docs:
+            chunks.extend(self._markdown_chunker.chunk_documents(markdown_docs))
+        if pdf_docs:
+            chunks.extend(self._text_chunker.chunk_documents(pdf_docs))
         console.print(f"[green]Created {len(chunks)} chunk(s). Embedding…[/green]")
 
         embeddings = self._embedder.embed_chunks(chunks)

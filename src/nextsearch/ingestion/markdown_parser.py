@@ -7,12 +7,15 @@ Handles:
 - Callouts  > [!NOTE] ...  →  kept as plain text
 """
 
+import logging
 import re
 from pathlib import Path
 
 import frontmatter  # python-frontmatter
 
 from nextsearch.ingestion.models import Document
+
+_logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -65,5 +68,5 @@ def parse_markdown_dir(directory: Path) -> list[Document]:
         try:
             docs.append(parse_markdown_file(md_path))
         except Exception as exc:  # noqa: BLE001
-            print(f"[WARN] Skipping {md_path}: {exc}")
+            _logger.warning("Skipping %s: %s", md_path, exc)
     return docs

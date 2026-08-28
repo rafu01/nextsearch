@@ -5,13 +5,16 @@ Batches requests automatically to respect the API's token-per-minute limits.
 
 from __future__ import annotations
 
+import logging
 import time
-from typing import Sequence
+from collections.abc import Sequence
 
 from openai import OpenAI
 from tqdm import tqdm
 
 from nextsearch.ingestion.models import Chunk
+
+_logger = logging.getLogger(__name__)
 
 
 class OpenAIEmbedder:
@@ -79,11 +82,11 @@ class OpenAIEmbedder:
                 response = self._client.embeddings.create(**kwargs)
                 # Results come back sorted by index — preserve order.
                 return [item.embedding for item in sorted(response.data, key=lambda x: x.index)]
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 if attempt == retries - 1:
                     raise
                 wait = 2 ** attempt
-                print(f"[WARN] Embedding batch failed ({exc}); retrying in {wait}s…")
+                _logger.warning("Embedding batch failed (%s); retrying in %ss…", exc, wait)
                 time.sleep(wait)
 
         raise RuntimeError("Unreachable")

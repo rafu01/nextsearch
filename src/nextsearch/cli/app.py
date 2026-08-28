@@ -8,6 +8,9 @@ Commands
   nextsearch reset    — wipe the vector store
 """
 
+from __future__ import annotations
+
+import logging
 from pathlib import Path
 
 import typer
@@ -15,6 +18,7 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 
+from nextsearch.logging_config import setup_logging
 from nextsearch.pipeline import RAGPipeline
 
 app = typer.Typer(
@@ -23,6 +27,14 @@ app = typer.Typer(
     add_completion=False,
 )
 console = Console()
+
+
+@app.callback()
+def _common(
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logging."),
+) -> None:
+    """Shared CLI options."""
+    setup_logging(level=logging.DEBUG if verbose else logging.INFO)
 
 # Lazy-loaded pipeline singleton
 _pipeline: RAGPipeline | None = None
@@ -37,13 +49,13 @@ def _get_pipeline() -> RAGPipeline:
 
 @app.command()
 def ingest(
-    obsidian_dir: Path = typer.Option(
+    obsidian_dir: Path = typer.Option(  # noqa: B008
         Path("data/raw/obsidian"),
         "--obsidian", "-o",
         help="Path to your Obsidian vault (or subfolder).",
         exists=False,
     ),
-    pdf_dir: Path = typer.Option(
+    pdf_dir: Path = typer.Option(  # noqa: B008
         Path("data/raw/pdfs"),
         "--pdfs", "-p",
         help="Path to your PDF textbooks directory.",

@@ -30,6 +30,7 @@ dependencies = [
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
     "tiktoken>=0.7",
+    "langchain-text-splitters>=0.3",
 ]
 
 [project.optional-dependencies]
