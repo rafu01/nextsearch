@@ -97,6 +97,12 @@ class ChromaVectorStore(VectorStore):
             metadata={"hnsw:space": "cosine"},
         )
 
+    def delete(self, ids: list[str]) -> None:
+        """Delete chunks by ID."""
+        if not ids:
+            return
+        self._col.delete(ids=ids)
+
 
 # ---------------------------------------------------------------------------
 # Helpers

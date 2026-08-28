@@ -49,3 +49,7 @@ class VectorStore(ABC):
     @abstractmethod
     def reset(self) -> None:
         """Delete all documents from the store."""
+
+    @abstractmethod
+    def delete(self, ids: list[str]) -> None:
+        """Delete documents by ID."""

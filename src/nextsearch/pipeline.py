@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from pathlib import Path
 
 from rich.console import Console
@@ -11,8 +12,9 @@ from nextsearch.config import settings
 from nextsearch.embedding.openai_embedder import OpenAIEmbedder
 from nextsearch.generation.gemini_generator import GeminiGenerator
 from nextsearch.ingestion.chunker import MarkdownChunker, TextChunker
+from nextsearch.ingestion.manifest import FileEntry, IngestionManifest, hash_file
 from nextsearch.ingestion.markdown_parser import parse_markdown_dir
-from nextsearch.ingestion.models import Chunk
+from nextsearch.ingestion.models import Chunk, Document
 from nextsearch.ingestion.pdf_parser import parse_pdf_dir
 from nextsearch.retrieval.retriever import Retriever
 from nextsearch.vector_store.chroma_store import ChromaVectorStore
@@ -58,6 +60,31 @@ class RAGPipeline:
             chunk_size=settings.chunk_size,
             chunk_overlap=settings.chunk_overlap,
         )
+        self._manifest_path = settings.chroma_persist_dir / "ingestion_manifest.json"
+        self._manifest = IngestionManifest()
+        self._manifest.load(self._manifest_path)
+
+    # ------------------------------------------------------------------
+    # Ingestion helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _scan_files(obsidian_dir: Path | None, pdf_dir: Path | None) -> dict[str, str]:
+        """Return a map of resolved file path → content hash."""
+        files: dict[str, str] = {}
+        if obsidian_dir and obsidian_dir.exists():
+            for path in sorted(obsidian_dir.rglob("*.md")):
+                files[str(path.resolve())] = hash_file(path)
+        if pdf_dir and pdf_dir.exists():
+            for path in sorted(pdf_dir.rglob("*.pdf")):
+                files[str(path.resolve())] = hash_file(path)
+        return files
+
+    @staticmethod
+    def _is_under_any(path: str, roots: list[Path]) -> bool:
+        """Check whether *path* lives under any of the provided root directories."""
+        path_obj = Path(path)
+        return any(path_obj.is_relative_to(root) for root in roots)
 
     # ------------------------------------------------------------------
     # Ingestion
@@ -69,7 +96,11 @@ class RAGPipeline:
         pdf_dir: Path | None = None,
         reset: bool = False,
     ) -> None:
-        """Parse, chunk, embed, and store all documents.
+        """Parse, chunk, embed, and store documents incrementally.
+
+        Unchanged files are skipped. New, changed, and deleted files are handled
+        automatically by comparing file content hashes against the ingestion
+        manifest.
 
         Parameters
         ----------
@@ -78,24 +109,69 @@ class RAGPipeline:
         pdf_dir:
             Directory containing PDF textbooks.
         reset:
-            If True, wipe the vector store before ingesting.
+            If True, wipe the vector store and manifest before ingesting.
         """
         if reset:
-            console.print("[yellow]Resetting vector store…[/yellow]")
+            console.print("[yellow]Resetting vector store and manifest…[/yellow]")
             self._store.reset()
+            self._manifest = IngestionManifest()
+            self._manifest.save(self._manifest_path)
 
-        docs = []
-
+        # Roots currently being synced; files outside these roots are left alone.
+        roots: list[Path] = []
         if obsidian_dir and obsidian_dir.exists():
-            console.print(f"[cyan]Parsing Obsidian notes from {obsidian_dir}…[/cyan]")
-            docs.extend(parse_markdown_dir(obsidian_dir))
-
+            roots.append(obsidian_dir.resolve())
         if pdf_dir and pdf_dir.exists():
-            console.print(f"[cyan]Parsing PDFs from {pdf_dir}…[/cyan]")
+            roots.append(pdf_dir.resolve())
+
+        current_files = self._scan_files(obsidian_dir, pdf_dir)
+
+        # Only diff files that live under the directories we are ingesting now.
+        relevant_existing = {
+            path
+            for path in self._manifest.files
+            if self._is_under_any(path, roots)
+        }
+        view = IngestionManifest(
+            files={path: self._manifest.files[path] for path in relevant_existing}
+        )
+        _unchanged, new, changed, deleted = view.diff(current_files)
+
+        # Remove chunks for deleted files.
+        if deleted:
+            ids_to_delete: list[str] = []
+            for path in deleted:
+                ids_to_delete.extend(self._manifest.files[path].chunk_ids)
+            if ids_to_delete:
+                console.print(
+                    f"[yellow]Removing chunks for {len(deleted)} deleted file(s)…[/yellow]"
+                )
+                self._store.delete(ids_to_delete)
+            for path in deleted:
+                del self._manifest.files[path]
+
+        to_process = new | changed
+        if not to_process:
+            self._manifest.save(self._manifest_path)
+            console.print("[green]No changes detected. Nothing to ingest.[/green]")
+            return
+
+        console.print(
+            f"[cyan]Processing {len(to_process)} file(s) "
+            f"({len(new)} new, {len(changed)} changed)…[/cyan]"
+        )
+
+        docs: list[Document] = []
+        if obsidian_dir and obsidian_dir.exists():
+            docs.extend(parse_markdown_dir(obsidian_dir))
+        if pdf_dir and pdf_dir.exists():
             docs.extend(parse_pdf_dir(pdf_dir))
+
+        docs = [d for d in docs if str(d.source) in to_process]
 
         if not docs:
             console.print("[red]No documents found. Check your data directories.[/red]")
+            self._manifest.save(self._manifest_path)
             return
 
         console.print(f"[green]Loaded {len(docs)} document(s). Chunking…[/green]")
@@ -117,6 +193,19 @@ class RAGPipeline:
             texts=[c.text for c in chunks],
             metadatas=[{**c.metadata, "doc_type": c.doc_type} for c in chunks],
         )
+
+        # Update manifest with the new chunk IDs for each processed file.
+        file_chunk_ids: dict[str, list[str]] = defaultdict(list)
+        for chunk in chunks:
+            file_chunk_ids[str(chunk.source)].append(chunk.chunk_id)
+
+        for path in to_process:
+            self._manifest.files[path] = FileEntry(
+                hash=current_files[path],
+                chunk_ids=file_chunk_ids.get(path, []),
+            )
+
+        self._manifest.save(self._manifest_path)
 
         console.print(
             f"[bold green]✓ Ingestion complete.[/bold green] "
