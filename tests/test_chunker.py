@@ -1,9 +1,9 @@
 """Unit tests for the TextChunker."""
 
-import pytest
+from pathlib import Path
+
 from nextsearch.ingestion.chunker import TextChunker
 from nextsearch.ingestion.models import Document
-from pathlib import Path
 
 
 def make_doc(content: str) -> Document:
@@ -60,8 +60,11 @@ def test_overlap_makes_first_tokens_of_chunk2_same_as_last_tokens_of_chunk1():
 
 
 def test_chunk_id_format():
+    import hashlib
+
     chunker = TextChunker(chunk_size=50, chunk_overlap=5)
     doc = make_doc("Some content " * 30)
     chunks = chunker.chunk_document(doc)
+    path_hash = hashlib.sha256(str(doc.source).encode("utf-8")).hexdigest()[:8]
     for i, c in enumerate(chunks):
-        assert c.chunk_id == f"note__{i}"
+        assert c.chunk_id == f"note_{path_hash}__{i}"

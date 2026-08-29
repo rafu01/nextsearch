@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
+import logging
 from pathlib import Path
 
 from rich.console import Console
@@ -13,13 +13,14 @@ from nextsearch.embedding.openai_embedder import OpenAIEmbedder
 from nextsearch.generation.gemini_generator import GeminiGenerator
 from nextsearch.ingestion.chunker import MarkdownChunker, TextChunker
 from nextsearch.ingestion.manifest import FileEntry, IngestionManifest, hash_file
-from nextsearch.ingestion.markdown_parser import parse_markdown_dir
+from nextsearch.ingestion.markdown_parser import parse_markdown_file
 from nextsearch.ingestion.models import Chunk, Document
-from nextsearch.ingestion.pdf_parser import parse_pdf_dir
+from nextsearch.ingestion.pdf_parser import parse_pdf_file
 from nextsearch.retrieval.retriever import Retriever
 from nextsearch.vector_store.chroma_store import ChromaVectorStore
 
 console = Console()
+_logger = logging.getLogger(__name__)
 
 
 class RAGPipeline:
@@ -90,6 +91,30 @@ class RAGPipeline:
     # Ingestion
     # ------------------------------------------------------------------
 
+    def _parse_file(self, path: Path) -> Document | None:
+        """Parse a single markdown or PDF file.
+
+        Returns None for unsupported file types or files that fail to parse.
+        """
+        suffix = path.suffix.lower()
+        try:
+            if suffix == ".md":
+                return parse_markdown_file(path)
+            if suffix == ".pdf":
+                return parse_pdf_file(path)
+        except Exception as exc:  # noqa: BLE001
+            _logger.warning("Failed to parse %s: %s", path, exc)
+            return None
+
+        _logger.warning("Unsupported file type, skipping %s", path)
+        return None
+
+    def _chunk_document(self, doc: Document, start_index: int) -> list[Chunk]:
+        """Chunk a single document with the right chunker."""
+        if doc.doc_type == "markdown":
+            return self._markdown_chunker.chunk_document(doc, start_index=start_index)
+        return self._text_chunker.chunk_document(doc, start_index=start_index)
+
     def ingest(
         self,
         obsidian_dir: Path | None = None,
@@ -97,6 +122,9 @@ class RAGPipeline:
         reset: bool = False,
     ) -> None:
         """Parse, chunk, embed, and store documents incrementally.
+
+        Processes one file at a time so memory usage stays bounded by the
+        largest single document, not the entire vault.
 
         Unchanged files are skipped. New, changed, and deleted files are handled
         automatically by comparing file content hashes against the ingestion
@@ -157,59 +185,48 @@ class RAGPipeline:
             return
 
         console.print(
-            f"[cyan]Processing {len(to_process)} file(s) "
+            f"[cyan]Streaming {len(to_process)} file(s) "
             f"({len(new)} new, {len(changed)} changed)…[/cyan]"
         )
 
-        docs: list[Document] = []
-        if obsidian_dir and obsidian_dir.exists():
-            docs.extend(parse_markdown_dir(obsidian_dir))
-        if pdf_dir and pdf_dir.exists():
-            docs.extend(parse_pdf_dir(pdf_dir))
+        total_chunks = 0
+        processed_files = 0
 
-        docs = [d for d in docs if str(d.source) in to_process]
+        for path in sorted(to_process):
+            doc = self._parse_file(Path(path))
+            if doc is None:
+                continue
 
-        if not docs:
-            console.print("[red]No documents found. Check your data directories.[/red]")
-            self._manifest.save(self._manifest_path)
-            return
+            chunks = self._chunk_document(doc, start_index=total_chunks)
+            if not chunks:
+                self._manifest.files[path] = FileEntry(
+                    hash=current_files[path],
+                    chunk_ids=[],
+                )
+                self._manifest.save(self._manifest_path)
+                continue
 
-        console.print(f"[green]Loaded {len(docs)} document(s). Chunking…[/green]")
-        markdown_docs = [d for d in docs if d.doc_type == "markdown"]
-        pdf_docs = [d for d in docs if d.doc_type != "markdown"]
+            embeddings = self._embedder.embed_chunks(chunks, show_progress=False)
 
-        chunks: list[Chunk] = []
-        if markdown_docs:
-            chunks.extend(self._markdown_chunker.chunk_documents(markdown_docs))
-        if pdf_docs:
-            chunks.extend(self._text_chunker.chunk_documents(pdf_docs))
-        console.print(f"[green]Created {len(chunks)} chunk(s). Embedding…[/green]")
-
-        embeddings = self._embedder.embed_chunks(chunks)
-
-        self._store.add(
-            ids=[c.chunk_id for c in chunks],
-            embeddings=embeddings,
-            texts=[c.text for c in chunks],
-            metadatas=[{**c.metadata, "doc_type": c.doc_type} for c in chunks],
-        )
-
-        # Update manifest with the new chunk IDs for each processed file.
-        file_chunk_ids: dict[str, list[str]] = defaultdict(list)
-        for chunk in chunks:
-            file_chunk_ids[str(chunk.source)].append(chunk.chunk_id)
-
-        for path in to_process:
-            self._manifest.files[path] = FileEntry(
-                hash=current_files[path],
-                chunk_ids=file_chunk_ids.get(path, []),
+            self._store.add(
+                ids=[c.chunk_id for c in chunks],
+                embeddings=embeddings,
+                texts=[c.text for c in chunks],
+                metadatas=[{**c.metadata, "doc_type": c.doc_type} for c in chunks],
             )
 
-        self._manifest.save(self._manifest_path)
+            total_chunks += len(chunks)
+            processed_files += 1
+
+            self._manifest.files[path] = FileEntry(
+                hash=current_files[path],
+                chunk_ids=[c.chunk_id for c in chunks],
+            )
+            self._manifest.save(self._manifest_path)
 
         console.print(
             f"[bold green]✓ Ingestion complete.[/bold green] "
-            f"Vector store now has {self._store.count()} chunk(s)."
+            f"Processed {processed_files} file(s), {total_chunks} chunk(s)."
         )
 
     # ------------------------------------------------------------------
