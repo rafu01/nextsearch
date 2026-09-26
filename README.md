@@ -4,6 +4,12 @@ A **RAG (Retrieval-Augmented Generation)** system built from scratch to let you 
 
 It ingests documents **incrementally** (only changed files are re-processed) and **streams** them one at a time to keep memory usage low.
 
+## Web UI
+
+Ask questions across your indexed notes and textbooks, then review grounded answers alongside their cited source passages.
+
+![NextSearch web UI showing a grounded answer and cited sources](docs/images/nextsearch-ui.png)
+
 ## Stack
 
 | Layer | Technology |
