@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { askQuestion, isDemoMode } from './services/searchService'
+import { renderAnswerMarkdown } from './renderMarkdown'
 
 const question = ref('')
 const state = ref('empty')
@@ -9,6 +10,7 @@ const errorMessage = ref('')
 const controller = ref(null)
 
 const canSubmit = computed(() => question.value.trim().length > 0 && state.value !== 'loading')
+const renderedAnswer = computed(() => renderAnswerMarkdown(result.value?.answer ?? ''))
 
 async function submitQuestion() {
   const query = question.value.trim()
@@ -109,7 +111,7 @@ function resetSearch() {
         </div>
         <div class="answer-body">
           <div class="answer-mark">“</div>
-          <p>{{ result.answer }}</p>
+          <div class="answer-text" v-html="renderedAnswer" />
         </div>
         <div class="sources-heading"><span>Sources</span><span class="source-count">{{ result.citations.length }} cited</span></div>
         <ul v-if="result.citations.length" class="sources-list">

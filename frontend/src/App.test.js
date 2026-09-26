@@ -5,7 +5,7 @@ import App from './App.vue'
 vi.mock('./services/searchService', () => ({
   isDemoMode: false,
   askQuestion: vi.fn(() => Promise.resolve({
-    answer: 'Attention uses several learned views of the input.',
+    answer: '**Attention** uses several learned views of the input.\n\n* One head tracks syntax\n* Another tracks meaning',
     citations: [{
       id: 'attention',
       title: 'Attention notes',
@@ -30,6 +30,8 @@ describe('NextSearch question interface', () => {
     await wrapper.get('form').trigger('submit')
     await vi.waitFor(() => expect(wrapper.text()).toContain('Attention uses several learned views'))
 
+    expect(wrapper.get('.answer-text strong').text()).toBe('Attention')
+    expect(wrapper.findAll('.answer-text li')).toHaveLength(2)
     expect(wrapper.text()).toContain('Attention notes')
     expect(wrapper.text()).toContain('attention.md')
   })
