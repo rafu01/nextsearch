@@ -1,7 +1,4 @@
-"""Generate embeddings using OpenAI's text-embedding API.
-
-Batches requests automatically to respect the API's token-per-minute limits.
-"""
+"""Generate embeddings using Google's Gemini embedding API via google-genai."""
 
 from __future__ import annotations
 
@@ -9,7 +6,8 @@ import logging
 import time
 from collections.abc import Sequence
 
-from openai import OpenAI
+from google import genai
+from google.genai import types
 from tqdm import tqdm
 
 from nextsearch.ingestion.models import Chunk
@@ -17,38 +15,42 @@ from nextsearch.ingestion.models import Chunk
 _logger = logging.getLogger(__name__)
 
 
-class OpenAIEmbedder:
-    """Wrap the OpenAI embeddings endpoint with batching + retry logic.
+class GeminiEmbedder:
+    """Wrap the Gemini embeddings endpoint with batching + retry logic.
 
     Parameters
     ----------
     api_key:
-        Your OpenAI API key.
+        Your Google AI API key.
     model:
-        Embedding model name, e.g. "text-embedding-3-small".
+        Embedding model name, e.g. "models/text-embedding-004".
     batch_size:
-        Number of texts to embed per API call (max 2048 for OpenAI).
-    dimensions:
-        Optional reduced dimension (only supported by v3 models).
+        Number of texts to embed per API call.
     """
 
     def __init__(
         self,
         api_key: str,
-        model: str = "text-embedding-3-small",
-        batch_size: int = 256,
-        dimensions: int | None = None,
+        model: str = "models/embedding-001",
+        batch_size: int = 100,
+        api_version: str = "v1",
     ) -> None:
-        self._client = OpenAI(api_key=api_key)
+        self._client = genai.Client(
+            api_key=api_key,
+            http_options={"api_version": api_version},
+        )
         self.model = model
         self.batch_size = batch_size
-        self.dimensions = dimensions
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
-    def embed_texts(self, texts: Sequence[str], show_progress: bool = True) -> list[list[float]]:
+    def embed_texts(
+        self,
+        texts: Sequence[str],
+        show_progress: bool = True,
+    ) -> list[list[float]]:
         """Return a list of embedding vectors, one per input text."""
         all_embeddings: list[list[float]] = []
         batches = list(self._batched(texts, self.batch_size))
@@ -60,28 +62,38 @@ class OpenAIEmbedder:
 
         return all_embeddings
 
-    def embed_chunks(self, chunks: list[Chunk], show_progress: bool = True) -> list[list[float]]:
+    def embed_chunks(
+        self,
+        chunks: list[Chunk],
+        show_progress: bool = True,
+    ) -> list[list[float]]:
         """Convenience wrapper: embed the .text of each Chunk."""
         return self.embed_texts([c.text for c in chunks], show_progress=show_progress)
 
     def embed_query(self, query: str) -> list[float]:
-        """Embed a single query string (no batching needed)."""
-        return self._embed_batch([query])[0]
+        """Embed a single query string."""
+        return self._embed_batch([query], task_type="RETRIEVAL_QUERY")[0]
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _embed_batch(self, texts: list[str], retries: int = 3) -> list[list[float]]:
-        kwargs: dict = {"input": texts, "model": self.model}
-        if self.dimensions is not None:
-            kwargs["dimensions"] = self.dimensions
+    def _embed_batch(
+        self,
+        texts: list[str],
+        task_type: str = "RETRIEVAL_DOCUMENT",
+        retries: int = 3,
+    ) -> list[list[float]]:
+        config = types.EmbedContentConfig(task_type=task_type)
 
         for attempt in range(retries):
             try:
-                response = self._client.embeddings.create(**kwargs)
-                # Results come back sorted by index — preserve order.
-                return [item.embedding for item in sorted(response.data, key=lambda x: x.index)]
+                response = self._client.models.embed_content(
+                    model=self.model,
+                    contents=texts,
+                    config=config,
+                )
+                return [embedding.values for embedding in response.embeddings]
             except Exception as exc:
                 if attempt == retries - 1:
                     raise

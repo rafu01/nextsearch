@@ -9,7 +9,9 @@ from rich.console import Console
 from rich.panel import Panel
 
 from nextsearch.config import settings
-from nextsearch.embedding.openai_embedder import OpenAIEmbedder
+from nextsearch.embedding.base import Embedder
+from nextsearch.embedding.gemini_embedder import GeminiEmbedder
+from nextsearch.embedding.local_embedder import LocalEmbedder
 from nextsearch.generation.gemini_generator import GeminiGenerator
 from nextsearch.ingestion.chunker import MarkdownChunker, TextChunker
 from nextsearch.ingestion.manifest import FileEntry, IngestionManifest, hash_file
@@ -17,6 +19,7 @@ from nextsearch.ingestion.markdown_parser import parse_markdown_file
 from nextsearch.ingestion.models import Chunk, Document
 from nextsearch.ingestion.pdf_parser import parse_pdf_file
 from nextsearch.retrieval.retriever import Retriever
+from nextsearch.vector_store.base import SearchResult
 from nextsearch.vector_store.chroma_store import ChromaVectorStore
 
 console = Console()
@@ -36,10 +39,16 @@ class RAGPipeline:
     """
 
     def __init__(self) -> None:
-        self._embedder = OpenAIEmbedder(
-            api_key=settings.openai_api_key,
-            model=settings.openai_embedding_model,
-        )
+        if settings.embedding_provider.lower() == "gemini":
+            self._embedder: Embedder = GeminiEmbedder(
+                api_key=settings.google_api_key,
+                model=settings.gemini_embedding_model,
+                api_version=settings.gemini_api_version,
+            )
+        else:
+            self._embedder = LocalEmbedder(
+                model=settings.local_embedding_model,
+            )
         self._store = ChromaVectorStore(
             persist_dir=settings.chroma_persist_dir,
             collection_name=settings.chroma_collection_name,
@@ -52,6 +61,7 @@ class RAGPipeline:
         self._generator = GeminiGenerator(
             api_key=settings.google_api_key,
             model=settings.gemini_model,
+            api_version=settings.gemini_api_version,
         )
         self._markdown_chunker = MarkdownChunker(
             chunk_size=settings.chunk_size,
@@ -233,6 +243,26 @@ class RAGPipeline:
     # Query
     # ------------------------------------------------------------------
 
+    def ask_with_sources(
+        self,
+        query: str,
+        top_k: int | None = None,
+        verbose: bool = False,
+    ) -> tuple[str, list[SearchResult]]:
+        """Ask a question and return the answer with its retrieved sources."""
+        results = self._retriever.retrieve(query, top_k=top_k)
+
+        if verbose:
+            console.print(Panel.fit("[bold]Retrieved Context[/bold]", style="blue"))
+            for i, r in enumerate(results, 1):
+                source = r.metadata.get("file_name", r.chunk_id)
+                console.print(f"[dim][{i}] {source}  (score={r.score:.3f})[/dim]")
+                console.print(r.text[:300] + ("…" if len(r.text) > 300 else ""))
+                console.rule()
+
+        answer = self._generator.generate(query, results)
+        return answer, results
+
     def ask(self, query: str, top_k: int | None = None, verbose: bool = False) -> str:
         """Ask a question and return the generated answer.
 
@@ -245,15 +275,5 @@ class RAGPipeline:
         verbose:
             If True, print the retrieved context before the answer.
         """
-        results = self._retriever.retrieve(query, top_k=top_k)
-
-        if verbose:
-            console.print(Panel.fit("[bold]Retrieved Context[/bold]", style="blue"))
-            for i, r in enumerate(results, 1):
-                source = r.metadata.get("file_name", r.chunk_id)
-                console.print(f"[dim][{i}] {source}  (score={r.score:.3f})[/dim]")
-                console.print(r.text[:300] + ("…" if len(r.text) > 300 else ""))
-                console.rule()
-
-        answer = self._generator.generate(query, results)
+        answer, _results = self.ask_with_sources(query, top_k=top_k, verbose=verbose)
         return answer

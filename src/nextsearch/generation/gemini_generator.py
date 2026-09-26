@@ -8,10 +8,10 @@ The generator assembles a prompt that includes:
 
 from __future__ import annotations
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 from nextsearch.vector_store.base import SearchResult
-
 
 _SYSTEM_PROMPT = """\
 You are a knowledgeable study assistant. You answer technical questions \
@@ -53,12 +53,16 @@ class GeminiGenerator:
         api_key: str,
         model: str = "gemini-1.5-pro",
         temperature: float = 0.2,
+        api_version: str = "v1",
     ) -> None:
-        genai.configure(api_key=api_key)
-        self._model = genai.GenerativeModel(
-            model_name=model,
+        self._client = genai.Client(
+            api_key=api_key,
+            http_options={"api_version": api_version},
+        )
+        self._model = model
+        self._config = types.GenerateContentConfig(
             system_instruction=_SYSTEM_PROMPT,
-            generation_config=genai.types.GenerationConfig(temperature=temperature),
+            temperature=temperature,
         )
 
     def generate(self, query: str, context_results: list[SearchResult]) -> str:
@@ -83,5 +87,9 @@ class GeminiGenerator:
             f"## Question\n\n{query}"
         )
 
-        response = self._model.generate_content(prompt)
+        response = self._client.models.generate_content(
+            model=self._model,
+            contents=prompt,
+            config=self._config,
+        )
         return response.text

@@ -1,1 +1,1 @@
-"""Embedding generation via OpenAI."""
+"""Embedding generation via Google Gemini."""

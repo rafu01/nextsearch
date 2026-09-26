@@ -1,6 +1,7 @@
 """Central configuration — reads from environment / .env file."""
 
 from pathlib import Path
+
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
@@ -8,13 +9,19 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     """All runtime settings resolved from environment variables."""
 
-    # --- OpenAI (embeddings) ---
-    openai_api_key: str = Field(..., env="OPENAI_API_KEY")
-    openai_embedding_model: str = Field("text-embedding-3-small", env="OPENAI_EMBEDDING_MODEL")
+    # --- Embeddings ---
+    embedding_provider: str = Field("local", env="EMBEDDING_PROVIDER")
+    local_embedding_model: str = Field(
+        "all-MiniLM-L6-v2", env="LOCAL_EMBEDDING_MODEL"
+    )
 
-    # --- Gemini (generation) ---
+    # --- Gemini (generation + optional embeddings) ---
     google_api_key: str = Field(..., env="GOOGLE_API_KEY")
+    gemini_api_version: str = Field("v1", env="GEMINI_API_VERSION")
     gemini_model: str = Field("gemini-1.5-pro", env="GEMINI_MODEL")
+    gemini_embedding_model: str = Field(
+        "models/gemini-embedding-001", env="GEMINI_EMBEDDING_MODEL"
+    )
 
     # --- Vector store ---
     chroma_persist_dir: Path = Field(Path("./data/chroma_db"), env="CHROMA_PERSIST_DIR")
@@ -30,6 +37,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        extra = "ignore"
 
 
 # Singleton — import this everywhere

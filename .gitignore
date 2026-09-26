@@ -1,6 +1,7 @@
 # IDE
 .idea/
 .vscode/
+.claude/
 
 # Secrets
 .env
@@ -26,6 +27,14 @@ htmlcov/
 
 # Type checking
 .mypy_cache/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/package-lock.json
+
+# Claude Code local settings
+.claude/settings.local.json
 
 # Data & vector store (don't commit your personal notes or DB)
 data/raw/

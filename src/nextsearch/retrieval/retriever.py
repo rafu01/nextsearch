@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from nextsearch.embedding.openai_embedder import OpenAIEmbedder
+from nextsearch.embedding.base import Embedder
 from nextsearch.vector_store.base import SearchResult, VectorStore
 
 
@@ -12,7 +12,7 @@ class Retriever:
     Parameters
     ----------
     embedder:
-        An OpenAIEmbedder (or any embedder with an ``embed_query`` method).
+        Any object implementing the Embedder protocol.
     vector_store:
         The vector store to search.
     top_k:
@@ -21,7 +21,7 @@ class Retriever:
 
     def __init__(
         self,
-        embedder: OpenAIEmbedder,
+        embedder: Embedder,
         vector_store: VectorStore,
         top_k: int = 5,
     ) -> None:
